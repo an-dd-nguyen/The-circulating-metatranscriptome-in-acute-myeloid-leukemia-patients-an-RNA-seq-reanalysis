@@ -1,0 +1,895 @@
+---
+title: "BeatAML_Genus_Analysis"
+output: html_document
+date: "2026-05-21"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(readxl)
+library(janitor)
+library(performance)
+library(caret)
+library(randomForest)
+library(ggpubr)
+library(scales)
+library(ggbeeswarm)
+library(tidyverse)
+```
+
+## Read file
+
+```{r cars}
+bug_norm = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Normalized_top100_genus.txt")
+
+
+
+bug_norm$SampleGroup = as.factor(bug_norm$SampleGroup)
+bug_norm$centerID = as.factor(bug_norm$centerID)
+```
+
+
+
+## Alpha Diversity
+```{r}
+shannon = diversity(bug_norm[, 6 : 105])
+simpson = diversity(bug_norm[, 6 : 105], index = "simpson")
+load = apply(bug_norm[, 6 : 105], 1, sum)
+
+bug_norm_AML = bug_norm |>
+  select(c(Filename, SampleType)) |>
+  mutate(shannon = shannon, simpson = simpson, load = load) |>
+  filter(SampleType != "Blood Derived Normal" & SampleType != "Control Analyte")
+
+bug_norm_AML = bug_norm_AML |>
+  pivot_longer(!c(Filename, SampleType), names_to = "Type", values_to = "Value")
+
+ggplot(bug_norm_AML |> filter(Type == "shannon"), aes(x = Type, y = Value)) +
+  geom_violin() +
+  geom_quasirandom() +
+  theme_bw(base_size = 12) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(y = expression(paste("Shannon index (", alpha, " diversity)")))
+
+ggplot(bug_norm_AML |> filter(Type == "simpson"), aes(x = Type, y = Value)) +
+  geom_violin() +
+  geom_quasirandom() +
+  theme_bw(base_size = 12) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(y = expression(paste("Simpson index (", alpha, " diversity)")))
+
+##Fix the alpha symbol
+
+ggplot(bug_norm_AML |> filter(Type == "load"), aes(x = Type, y = log10(Value))) +
+  geom_violin() +
+  geom_quasirandom() +
+  theme_bw(base_size = 12) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(y = expression(log[10](microbial ~ reads ~ per ~ billion ~ reads)))
+```
+
+## Diversity Group 12
+```{r}
+bug_norm_12 = bug_norm |>
+  mutate(shannon = shannon, simpson = simpson, load = load) |>
+  filter(SampleGroup == "13") |>
+  mutate(SampleType = case_when(SampleType != "Blood Derived Normal" & SampleType != "Control Analyte" ~ "AML",
+                                SampleType == "Blood Derived Normal" | SampleType == "Control Analyte" ~ "Healthy")) |>
+  select(c(SampleType, shannon, simpson, load))
+
+ggplot(bug_norm_12, aes(x = SampleType, y = load)) +
+  geom_boxplot()
+
+ggplot(bug_norm_12, aes(x = SampleType, y = shannon)) +
+  geom_boxplot(aes(fill = SampleType)) +
+  geom_quasirandom() +
+  stat_compare_means(
+    method = "wilcox.test", 
+    label = "p.format",      # Shows exact p-value (e.g., "p = 0.034"). Use "p.signif" for asterisks.
+    label.x = 1.2,            # Centers the text between the two boxplots
+    size = 4                  # Adjust text size if needed
+  ) +
+  theme_bw(base_size = 12) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12),
+        legend.position = "none") +
+  labs(y = expression(paste("Shannon index (", alpha, " diversity)")))
+
+
+
+bug_norm_12_morax = bug_norm |>
+  filter(SampleGroup == "13") |>
+  mutate(SampleType = case_when(SampleType != "Blood Derived Normal" & SampleType != "Control Analyte" ~ "AML",
+                                SampleType == "Blood Derived Normal" | SampleType == "Control Analyte" ~ "Healthy")) |>
+  select(c(SampleType, Moraxella))
+
+
+ggplot(bug_norm_12_morax, aes(x = SampleType, y = Moraxella)) +
+  geom_boxplot(aes(fill = SampleType)) +
+  geom_quasirandom() +
+  stat_compare_means(
+    method = "wilcox.test", 
+    label = "p.format",      # Shows exact p-value (e.g., "p = 0.034"). Use "p.signif" for asterisks.
+    label.x = 1.2,            # Centers the text between the two boxplots
+    size = 4                  # Adjust text size if needed
+  ) +
+  theme_bw(base_size = 12) +
+  theme(axis.title.x = element_blank(),
+        axis.text.x = element_text(size = 12),
+        legend.position = "none") +
+  labs(y = "Moraxella normalized abundance")
+```
+
+
+##Gram Positive Proportion
+```{r}
+gram = read_excel("../Downloads/BeatAML_Top100Genera_GramPositiveNegative_Classification.xlsx", col_names = c("Genus", "GramStatus", "Reference"))
+
+gram_positive_genera <- gram %>%
+  filter(GramStatus == "+") %>%
+  pull(Genus)
+
+gram_pos_cols <- intersect(gram_positive_genera, colnames(bug_norm))
+
+# 2. Calculate the total and Gram-positive reads row-by-row
+bug_norm_with_gram <- bug_norm %>%
+  filter(SampleType != "Blood Derived Normal" & SampleType != "Control Analyte") %>%
+  mutate(
+    # Sum up all numeric bacterial columns for the row total
+    Total_Reads = rowSums(across(where(is.numeric)), na.rm = TRUE),
+    
+    # Sum up only the columns matching Gram-positive genera
+    Gram_Positive_Reads = rowSums(across(all_of(gram_pos_cols)), na.rm = TRUE),
+    
+    # Calculate the proportion safely (averts division-by-zero errors)
+    Prop_Gram_Positive = if_else(Total_Reads > 0, Gram_Positive_Reads / Total_Reads, 0)
+  )
+
+hist(bug_norm_with_gram$Prop_Gram_Positive,
+     xlab = "Proportion of Gram Positive",
+     ylab = "Number of samples",
+     main = "")
+```
+
+
+
+## PCoA
+
+
+```{r pressure, echo=FALSE}
+bug_norm = bug_norm |>
+  filter(complete.cases(SampleGroup))
+
+genus_bray_curtis_dist = vegdist(bug_norm |> select_if(is.numeric)) |> as.matrix()
+
+colnames(genus_bray_curtis_dist) = bug_norm$Filename
+rownames(genus_bray_curtis_dist) = bug_norm$Filename
+
+
+genus_bray_curtis = cmdscale(genus_bray_curtis_dist)
+
+genus_bray_curtis_tibble = tibble(PC1  = genus_bray_curtis[,1],
+                                  PC2 = genus_bray_curtis[,2],
+                                  SampleGroup = factor(as.numeric(bug_norm$SampleGroup)), 
+                                  SampleType = bug_norm$SampleType,
+                                  centerID = bug_norm$centerID)
+
+genus_bray_curtis_tibble = genus_bray_curtis_tibble |>
+  mutate(SampleType = case_when(SampleType == "Control Analyte" ~ "12 Technical Replicates",
+                                SampleType == "Blood Derived Normal" ~ "Healthy",
+                                TRUE ~ "AML"))
+
+
+##SampleType
+ggplot(genus_bray_curtis_tibble,
+       aes(x = PC1, y = PC2, color = SampleType)) +
+  geom_point(alpha = 0.8) +
+  # Dynamically swaps out the space for a newline only for that specific name
+  scale_color_discrete(
+    labels = function(x) ifelse(x == "12 Technical Replicates", "12 Technical\nReplicates", x)
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.title = element_blank()) +
+  xlab("PCo1") + ylab("PCo2")
+
+##SampleGroup
+ggplot(genus_bray_curtis_tibble,
+       aes(x = PC1, y = PC2, color = SampleGroup)) +
+  theme_bw(base_size = 12) +
+  geom_point(alpha = 0.8) +
+  labs(color = "Sequencing Group") +
+  xlab("PCo1") + ylab("PCo2")
+
+
+##CenterID
+ggplot(genus_bray_curtis_tibble,
+       aes(x = PC1, y = PC2, color = centerID)) +
+  theme_bw(base_size = 12) +
+  geom_point(alpha = 0.8) +
+  labs(color = "Center ID") +
+  xlab("PCo1") + ylab("PCo2")
+
+```
+
+## Tech Top 5
+```{r}
+bug_norm_raw = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Rawcount_top100_genus.txt")
+
+wide_tech = bug_norm |> filter(SampleType == "Control Analyte")
+
+nonzero = which(colSums(wide_tech[ sapply(wide_tech, is.numeric)] ) > 0)
+
+tech_comp = wide_tech[ sapply(wide_tech, is.numeric)]
+tech_comp = tech_comp[, nonzero]
+
+
+tech_comp = sweep(tech_comp, 1, FUN="/",STATS=rowSums(tech_comp))
+tech_comp$SampleGroup = wide_tech$SampleGroup
+
+top5_comp = tech_comp |>
+  pivot_longer(!SampleGroup,
+               names_to = "Genus",
+               values_to = "Percentage") |>
+  group_by(SampleGroup) |> slice_max(order_by = Percentage, n = 5)
+
+
+top5_comp$SampleGroup = as.numeric(top5_comp$SampleGroup) 
+
+top5_comp$SampleGroup = as.factor(top5_comp$SampleGroup)
+
+ggplot(top5_comp, aes(x = SampleGroup, y = Percentage, fill = Genus)) +
+  geom_col()
+
+#Genus Abundance + Proportion
+patient_comp = bug_norm |>
+  filter(!(SampleType %in% (c("Blood Derived Normal", "Control Analyte"))))
+
+proportion = 
+  patient_comp |> select_if(is.numeric)
+
+proportion = 100*colSums(proportion != 0)/nrow(proportion)
+abundance = 
+  patient_comp |> select_if(is.numeric)
+
+abundance = apply(abundance, 2, mean)
+top30 = sort(abundance, decreasing = T)[1:30]
+
+proportion = sort(proportion, decreasing = T)
+
+top30_tibble = tibble(genus = names(proportion)[1:30], proportion = proportion[1 : 30], percentage = top30)
+
+ggplot(top30_tibble, aes(x = factor(genus, level = genus), y = proportion)) +
+  geom_col(width = 1, color = "white") +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 100)) +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, face = "italic")) +
+  labs(x = "Genus", y = "Percentage of samples")
+
+top30_tibble = tibble(genus = names(top30)[1:30], proportion = proportion[1 : 30], percentage = top30)
+
+ggplot(top30_tibble, aes(x = factor(genus, level = genus), y = log10(percentage))) +
+  geom_col(width = 1, color = "white") +
+  scale_y_continuous(expand = c(0, 0), limit = c(0, 3)) +
+  theme_bw() +
+  theme_bw(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1, face = "italic")) +
+  labs(
+    x = "Genus", 
+    y = expression(log[10] ~ mean ~ abundance))
+```
+
+## BC distance AML - Healthy in each group
+```{r}
+PC1_dist = outer(genus_bray_curtis_tibble$PC1, genus_bray_curtis_tibble$PC1, '-')
+row.names(PC1_dist) = bug_norm$Filename
+colnames(PC1_dist) = bug_norm$Filename
+
+#Group 2
+sample2 = bug_norm |> filter(SampleGroup == 2) |> pull(Filename)
+tech2 = bug_norm |> filter(SampleGroup == 2 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_2 = genus_bray_curtis_dist[sample2, sample2]
+row_tech2 = which(row.names(dist_2) == tech2)
+col_tech2 = which(colnames(dist_2) == tech2)
+
+dist_2_tech = dist_2[tech2, ]
+dist_2_tech = dist_2_tech[dist_2_tech > 0]
+
+dist_2 = dist_2[-row_tech2, ]
+dist_2 = dist_2[, -col_tech2]
+
+dist_2_all = dist_2[upper.tri(dist_2)]
+
+
+tibble2 = tibble(distance = c(dist_2_all, dist_2_tech),
+                 group = rep(2, length(c(dist_2_all,dist_2_tech))),
+                 subgroup = c(rep("All", length(dist_2_all)),
+                              rep("Tech", length(dist_2_tech))))
+
+wilcox.test(dist_2_all, dist_2_tech)
+
+
+# Group 3
+sample3 = bug_norm |> filter(SampleGroup == 3) |> pull(Filename)
+tech3 = bug_norm |> filter(SampleGroup == 3 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_3 = genus_bray_curtis_dist[sample3, sample3]
+row_tech3 = which(row.names(dist_3) == tech3)
+col_tech3 = which(colnames(dist_3) == tech3)
+
+dist_3_tech = dist_3[tech3, ]
+dist_3_tech = dist_3_tech[dist_3_tech > 0]
+
+dist_3 = dist_3[-row_tech3, ]
+dist_3 = dist_3[, -col_tech3]
+
+dist_3_all = dist_3[upper.tri(dist_3)]
+
+
+tibble3 = tibble(distance = c(dist_3_all, dist_3_tech),
+                 group = rep(3, length(c(dist_3_all,dist_3_tech))),
+                 subgroup = c(rep("All", length(dist_3_all)),
+                              rep("Tech", length(dist_3_tech))))
+wilcox.test(dist_3_all, dist_3_tech)
+
+# Group 4
+sample4 = bug_norm |> filter(SampleGroup == 4) |> pull(Filename)
+tech4 = bug_norm |> filter(SampleGroup == 4 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_4 = genus_bray_curtis_dist[sample4, sample4]
+row_tech4 = which(row.names(dist_4) == tech4)
+col_tech4 = which(colnames(dist_4) == tech4)
+
+dist_4_tech = dist_4[tech4, ]
+dist_4_tech = dist_4_tech[dist_4_tech > 0]
+
+dist_4 = dist_4[-row_tech4, ]
+dist_4 = dist_4[, -col_tech4]
+
+dist_4_all = dist_4[upper.tri(dist_4)]
+
+
+tibble4 = tibble(distance = c(dist_4_all, dist_4_tech),
+                 group = rep(4, length(c(dist_4_all,dist_4_tech))),
+                 subgroup = c(rep("All", length(dist_4_all)),
+                              rep("Tech", length(dist_4_tech))))
+
+wilcox.test(dist_4_all, dist_4_tech)
+# Group 5
+sample5 = bug_norm |> filter(SampleGroup == 5) |> pull(Filename)
+tech5 = bug_norm |> filter(SampleGroup == 5 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_5 = genus_bray_curtis_dist[sample5, sample5]
+row_tech5 = which(row.names(dist_5) == tech5)
+col_tech5 = which(colnames(dist_5) == tech5)
+
+dist_5_tech = dist_5[tech5, ]
+dist_5_tech = dist_5_tech[dist_5_tech > 0]
+
+dist_5 = dist_5[-row_tech5, ]
+dist_5 = dist_5[, -col_tech5]
+dist_5_all = dist_5[upper.tri(dist_5)]
+
+tibble5 = tibble(distance = c(dist_5_all, dist_5_tech),
+                 group = rep(5, length(c(dist_5_all,dist_5_tech))),
+                 subgroup = c(rep("All", length(dist_5_all)),
+                              rep("Tech", length(dist_5_tech))))
+
+wilcox.test(dist_5_all, dist_5_tech)
+# Group 6
+sample6 = bug_norm |> filter(SampleGroup == 6) |> pull(Filename)
+tech6 = bug_norm |> filter(SampleGroup == 6 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_6 = genus_bray_curtis_dist[sample6, sample6]
+row_tech6 = which(row.names(dist_6) == tech6)
+col_tech6 = which(colnames(dist_6) == tech6)
+
+dist_6_tech = dist_6[tech6, ]
+dist_6_tech = dist_6_tech[dist_6_tech > 0]
+
+dist_6 = dist_6[-row_tech6, ]
+dist_6 = dist_6[, -col_tech6]
+dist_6_all = dist_6[upper.tri(dist_6)]
+
+tibble6 = tibble(distance = c(dist_6_all, dist_6_tech),
+                 group = rep(6, length(c(dist_6_all,dist_6_tech))),
+                 subgroup = c(rep("All", length(dist_6_all)),
+                              rep("Tech", length(dist_6_tech))))
+
+wilcox.test(dist_6_all, dist_6_tech)
+# Group 7
+sample7 = bug_norm |> filter(SampleGroup == 7) |> pull(Filename)
+tech7 = bug_norm |> filter(SampleGroup == 7 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_7 = genus_bray_curtis_dist[sample7, sample7]
+row_tech7 = which(row.names(dist_7) == tech7)
+col_tech7 = which(colnames(dist_7) == tech7)
+
+dist_7_tech = dist_7[tech7, ]
+dist_7_tech = dist_7_tech[dist_7_tech > 0]
+
+dist_7 = dist_7[-row_tech7, ]
+dist_7 = dist_7[, -col_tech7]
+dist_7_all = dist_7[upper.tri(dist_7)]
+
+tibble7 = tibble(distance = c(dist_7_all, dist_7_tech),
+                 group = rep(7, length(c(dist_7_all,dist_7_tech))),
+                 subgroup = c(rep("All", length(dist_7_all)),
+                              rep("Tech", length(dist_7_tech))))
+
+wilcox.test(dist_7_all, dist_7_tech)
+# Group 8
+sample8 = bug_norm |> filter(SampleGroup == 8) |> pull(Filename)
+tech8 = bug_norm |> filter(SampleGroup == 8 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_8 = genus_bray_curtis_dist[sample8, sample8]
+row_tech8 = which(row.names(dist_8) == tech8)
+col_tech8 = which(colnames(dist_8) == tech8)
+
+dist_8_tech = dist_8[tech8, ]
+dist_8_tech = dist_8_tech[dist_8_tech > 0]
+
+dist_8 = dist_8[-row_tech8, ]
+dist_8 = dist_8[, -col_tech8]
+dist_8_all = dist_8[upper.tri(dist_8)]
+
+tibble8 = tibble(distance = c(dist_8_all, dist_8_tech),
+                 group = rep(8, length(c(dist_8_all,dist_8_tech))),
+                 subgroup = c(rep("All", length(dist_8_all)),
+                              rep("Tech", length(dist_8_tech))))
+
+wilcox.test(dist_8_all, dist_8_tech)
+# Group 9
+sample9 = bug_norm |> filter(SampleGroup == 9) |> pull(Filename)
+tech9 = bug_norm |> filter(SampleGroup == 9 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_9 = genus_bray_curtis_dist[sample9, sample9]
+row_tech9 = which(row.names(dist_9) == tech9)
+col_tech9 = which(colnames(dist_9) == tech9)
+
+dist_9_tech = dist_9[tech9, ]
+dist_9_tech = dist_9_tech[dist_9_tech > 0]
+
+dist_9 = dist_9[-row_tech9, ]
+dist_9 = dist_9[, -col_tech9]
+dist_9_all = dist_9[upper.tri(dist_9)]
+
+tibble9 = tibble(distance = c(dist_9_all, dist_9_tech),
+                 group = rep(9, length(c(dist_9_all,dist_9_tech))),
+                 subgroup = c(rep("All", length(dist_9_all)),
+                              rep("Tech", length(dist_9_tech))))
+
+wilcox.test(dist_9_all, dist_9_tech)
+
+# Group 10
+sample10 = bug_norm |> filter(SampleGroup == 10) |> pull(Filename)
+tech10 = bug_norm |> filter(SampleGroup == 10 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_10 = genus_bray_curtis_dist[sample10, sample10]
+row_tech10 = which(row.names(dist_10) == tech10)
+col_tech10 = which(colnames(dist_10) == tech10)
+
+dist_10_tech = dist_10[tech10, ]
+dist_10_tech = dist_10_tech[dist_10_tech > 0]
+
+dist_10 = dist_10[-row_tech10, ]
+dist_10 = dist_10[, -col_tech10]
+dist_10_all = dist_10[upper.tri(dist_10)]
+
+tibble10 = tibble(distance = c(dist_10_all, dist_10_tech),
+                  group = rep(10, length(c(dist_10_all,dist_10_tech))),
+                  subgroup = c(rep("All", length(dist_10_all)),
+                               rep("Tech", length(dist_10_tech))))
+
+wilcox.test(dist_10_all, dist_10_tech)
+# Group 11
+sample11 = bug_norm |> filter(SampleGroup == 11) |> pull(Filename)
+tech11 = bug_norm |> filter(SampleGroup == 11 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_11 = genus_bray_curtis_dist[sample11, sample11]
+row_tech11 = which(row.names(dist_11) == tech11)
+col_tech11 = which(colnames(dist_11) == tech11)
+
+dist_11_tech = dist_11[tech11, ]
+dist_11_tech = dist_11_tech[dist_11_tech > 0]
+
+dist_11 = dist_11[-row_tech11, ]
+dist_11 = dist_11[, -col_tech11]
+dist_11_all = dist_11[upper.tri(dist_11)]
+tibble11 = tibble(distance = c(dist_11_all, dist_11_tech),
+                  group = rep(11, length(c(dist_11_all,dist_11_tech))),
+                  subgroup = c(rep("All", length(dist_11_all)),
+                               rep("Tech", length(dist_11_tech))))
+
+wilcox.test(dist_11_all, dist_11_tech)
+# Group 12
+sample12 = bug_norm |> filter(SampleGroup == 12) |> pull(Filename)
+tech12 = bug_norm |> filter(SampleGroup == 12 & SampleType == "Control Analyte") |> pull(Filename)
+
+dist_12 = genus_bray_curtis_dist[sample12, sample12]
+row_tech12 = which(row.names(dist_12) == tech12)
+col_tech12 = which(colnames(dist_12) == tech12)
+
+dist_12_tech = dist_12[tech12, ]
+dist_12_tech = dist_12_tech[dist_12_tech > 0]
+
+dist_12 = dist_12[-row_tech12, ]
+dist_12 = dist_12[, -col_tech12]
+dist_12_all = dist_12[upper.tri(dist_12)]
+
+tibble12 = tibble(distance = c(dist_12_all, dist_12_tech),
+                  group = rep(12, length(c(dist_12_all,dist_12_tech))),
+                  subgroup = c(rep("All", length(dist_12_all)),
+                               rep("Tech", length(dist_12_tech))))
+
+wilcox.test(dist_12_all, dist_12_tech)
+# Group 13
+sample13 = bug_norm |> filter(SampleGroup == 13) |> pull(Filename)
+tech13 = bug_norm |> filter(SampleGroup == 13 & (SampleType == "Control Analyte")) |> pull(Filename)
+
+dist_13 = genus_bray_curtis_dist[sample13, sample13]
+row_tech13 = which(row.names(dist_13) %in% tech13)
+col_tech13 = which(colnames(dist_13) %in% tech13)
+
+dist_13_tech = dist_13[tech13, ]
+dist_13_tech = dist_13_tech[dist_13_tech > 0]
+
+dist_13 = dist_13[-row_tech13, ]
+dist_13 = dist_13[, -col_tech13]
+dist_13_all = dist_13[upper.tri(dist_13)]
+
+tibble13 = tibble(distance = c(dist_13_all, dist_13_tech),
+                  group = rep(13, length(c(dist_13_all,dist_13_tech))),
+                  subgroup = c(rep("All", length(dist_13_all)),
+                               rep("Tech", length(dist_13_tech))))
+
+wilcox.test(dist_13_all, dist_13_tech)
+
+tibble = rbind(tibble2, tibble3, tibble4, tibble5, tibble6,
+               tibble7, tibble8, tibble9, tibble10, tibble11,
+               tibble12, tibble13)
+
+tibble$group = tibble$group - 1
+
+tibble$group = as.factor(tibble$group)
+
+ggplot(tibble, aes(x = (group), y = (distance), fill = factor(subgroup))) +
+  geom_boxplot() +
+  theme_bw(base_size = 22) +
+  xlab("Sequencing Group") +
+  ylab("Bray-Curtis dissimilarity") +
+  scale_fill_discrete(name = "Bray-Curtis dissimilarity in",
+                       labels = c("AML pairs", 
+                                  "Healthy/AML pairs")) +
+  theme(legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        legend.key.width = unit(0.5,"cm")) +
+  stat_compare_means(aes(label = ..p.signif..),
+                     method = "wilcox", size = 10)
+```
+
+
+## Genus Mean Healthy vs AML
+```{r}
+x1 = bug_norm |>
+  mutate(SampleType = case_when(`SampleType` == "Control Analyte" ~ "Healthy",
+                                `SampleType` == "Blood Derived Normal" ~ "Healthy",
+                                TRUE ~ "AML samples")) |> 
+  filter(SampleGroup == "13") |>
+  select(-c(SampleGroup, SampleID, centerID)) #|>
+  #filter(SampleType != "12 Technical Replicates")
+
+#x1 = rbind(x1, control_analyte_sum)
+x1_proportion = x1 |>
+rowwise() %>%
+  # 2. Calculate the sum of all count columns (from column 3 to 102) for the current row
+  # 'c_across' safely selects columns within a rowwise context
+  mutate(Row_Sum = sum(c_across(3:102))) %>%
+  # 3. Exit row-wise mode for better performance on the next step
+  ungroup() %>%
+  # 4. Divide every value in the count columns (3:102) by the calculated Row_Sum
+  # '.x' refers to the current column's value
+  mutate(across(3:102, ~ .x / Row_Sum)) %>%
+  # 5. Remove the temporary total sum column
+  select(-Row_Sum)
+
+long_x1 = x1 |>
+  pivot_longer(cols = !c(Filename, SampleType),
+               names_to = "Genus",
+               values_to = "Reads")
+
+long_x1_proportion = x1_proportion |>
+  pivot_longer(cols = !c(Filename, SampleType),
+               names_to = "Genus",
+               values_to = "Reads")
+
+
+x1_summary = long_x1 |>
+  group_by(SampleType, Genus) |>
+  summarise(mean = mean(Reads), median = median(Reads))
+
+x1_proportion_summary = long_x1_proportion |>
+  group_by(SampleType, Genus) |>
+  summarise(mean = mean(Reads), median = median(Reads))
+
+ratio_x1 <- long_x1 %>%
+  # 1. Calculate the mean Reads (abundance) for every Genus in every SampleType group
+  group_by(Genus, SampleType) %>%
+  summarise(
+    Mean_Reads = mean(Reads, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  
+  # 2. Pivot the table to make the two SampleType groups separate columns
+  pivot_wider(
+    names_from = SampleType,
+    values_from = Mean_Reads
+  ) 
+
+ratio_x1 = ratio_x1 %>%
+  
+  # 3. Calculate the ratio (Mean A / Mean B)
+  # !!! REPLACE "Group_A_Name" and "Group_B_Name" with your actual SampleType values !!!
+  mutate(
+    # The backticks (`) are necessary if your group names contain spaces or special characters
+    Log_Ratio_AML_to_Healthy = log2((`AML samples` + 1) / (Healthy + 1))
+  ) %>%
+  
+  # 4. Select the final columns and arrange by ratio
+  select(Genus, Log_Ratio_AML_to_Healthy, everything()) %>%
+  arrange(desc(Log_Ratio_AML_to_Healthy))
+
+ratio_x1_top10 = ratio_x1[c(1:10, 91:100), ]
+
+phyla_vector <- c(
+  "Bacillota",          # Anaerostipes
+  "Bacillota",          # Lactococcus
+  "Pseudomonadota",     # Simonsiella
+  "Pseudomonadota",     # Bartonella
+  "Pseudomonadota",     # Pigmentiphaga
+  "Fusobacteriota",     # Fusobacterium
+  "Bacillota",          # Enterococcus
+  "Campylobacterota",   # Campylobacter
+  "Pseudomonadota",     # Shewanella
+  "Pseudomonadota",     # Pandoraea
+  "Pseudomonadota",     # Advenella
+  "Actinomycetota",     # Dermacoccus
+  "Bacillota",          # Clostridium
+  "Pseudomonadota",     # Microvirga
+  "Pseudomonadota",     # Methylorubrum
+  "Pseudomonadota",     # Agrobacterium
+  "Actinomycetota",     # Lawsonella
+  "Uroviricota",        # Pahexavirus (Virus)
+  "Bacillota",          # Dolosigranulum
+  "Pseudomonadota"      # Moraxella
+)
+
+ratio_x1_top10$Phylum = phyla_vector
+
+
+ratio_x1_proportion <- long_x1_proportion %>%
+  # 1. Calculate the mean Reads (abundance) for every Genus in every SampleType group
+  group_by(Genus, SampleType) %>%
+  summarise(
+    Mean_Reads = mean(Reads, na.rm = TRUE),
+    .groups = 'drop'
+  ) %>%
+  
+  # 2. Pivot the table to make the two SampleType groups separate columns
+  pivot_wider(
+    names_from = SampleType,
+    values_from = Mean_Reads
+  ) 
+
+ratio_x1_proportion = ratio_x1_proportion %>%
+  
+  # 3. Calculate the ratio (Mean A / Mean B)
+  # !!! REPLACE "Group_A_Name" and "Group_B_Name" with your actual SampleType values !!!
+  mutate(
+    # The backticks (`) are necessary if your group names contain spaces or special characters
+    Log_Ratio_AML_to_Healthy = log((`AML samples` + 1) / (Healthy + 1))
+  ) %>%
+  
+  # 4. Select the final columns and arrange by ratio
+  select(Genus, Log_Ratio_AML_to_Healthy, everything()) %>%
+  arrange(desc(Log_Ratio_AML_to_Healthy))
+
+ratio_x1_proportion_top10 = ratio_x1_proportion[c(1:10, 91:100), ]
+
+
+
+wilcox_results <- long_x1 %>%
+  # 1. Filter for the two groups of interest (assuming these are the exact names)
+  filter(SampleType %in% c("AML samples", "Healthy")) %>%
+  
+  # 2. Group the data by Genus
+  group_by(Genus) %>%
+  
+  # 3. Filter out Genera that cannot be tested (e.g., fewer than 2 samples in one group)
+  filter(n_distinct(SampleType) == 2, n() > 5) %>%
+  
+  # 4. Perform the Wilcoxon test for each Genus
+  summarise(
+    # The formula 'Reads ~ SampleType' compares the Reads between the two groups
+    wilcox_test = list(wilcox.test(Reads ~ SampleType, data = cur_data(), exact = FALSE) %>%
+                       tidy()),
+    .groups = 'drop'
+  ) %>%
+  
+  # 5. Unnest the test results to make the table tidy
+  unnest(wilcox_test) %>%
+  
+  # 6. Select and rename columns
+  select(
+    Genus, 
+    p.value, 
+    W_statistic = statistic
+  ) %>%
+  
+  # 7. Adjust p-values for Multiple Testing (Benjamini-Hochberg/FDR correction)
+  mutate(
+    p.adj = p.adjust(p.value, method = "BH")
+  ) %>%
+  
+  # 8. Add a column indicating significance level
+  mutate(
+    Significance = case_when(
+      p.adj < 0.001 ~ "***",
+      p.adj < 0.01 ~ "**",
+      p.adj < 0.05 ~ "*",
+      TRUE ~ ""
+    )
+  ) %>%
+  
+  # 9. Arrange the results by adjusted p-value
+  arrange(p.adj)
+
+# --- Assuming data and colors are prepared from previous steps ---
+# ratio_x1_top10, phylum_colors, genus_label_colors, etc. are defined.
+
+ratio_x1_top10 = left_join(ratio_x1_top10, wilcox_results |> select(c(Genus, p.value, Significance)))
+
+ratio_x1_top10 = ratio_x1_top10 |>
+  mutate(
+    # Create the numeric Symbol_Size column based on Significance
+    Symbol_Size = case_when(
+      p.value <= 0.01 ~ 4.5,  # Largest size for highest significance
+      p.value <= 0.05 ~ 3.5,
+      TRUE ~ 2 # Smallest size for non-significant/empty ("")
+    ),
+    Significance = factor(case_when(
+      p.value <= 0.05 ~ "O",
+      p.value > 0.05 ~ "X"
+    ))
+  )
+
+# Recalculate X-axis limits for precision
+
+phylum_display_order <- ratio_x1_top10 %>%
+  select(Phylum) %>%
+  distinct() %>%
+  pull(Phylum)
+
+
+ratio_x1_top10 <- ratio_x1_top10 %>%
+  # 2. Reorder the Phylum factor based on the unique appearance in the current data frame
+  filter(p.value < 0.05) |> 
+  mutate(Phylum = factor(Phylum, levels = phylum_display_order)) |>
+  arrange(Phylum) |>
+  # 1. Convert Genus to a factor using the current order of appearance.
+  mutate(Genus = fct_inorder(Genus)) |>
+  mutate(Genus = fct_rev(Genus)) 
+
+
+phylum_levels <- unique(ratio_x1_top10$Phylum)
+n_phyla <- length(phylum_levels)
+
+# Use hue_pal() to generate distinct colors automatically
+# We use this to ensure consistent colors across the plot and labels
+base_colors <- hue_pal()(n_phyla) 
+
+# Create the named vector for scale_color/fill_manual
+phylum_colors <- setNames(base_colors, phylum_levels)
+
+# --- 2. Generate the Y-Axis Label Colors (genus_label_colors) ---
+# CRITICAL: This vector must align perfectly with the row order (Genus factor order)
+# of your final data frame (ratio_x1_top10_fixed).
+
+genus_label_colors <- ratio_x1_top10 %>%
+  # Select the Phylum column in the correct Genus order
+  select(Phylum) %>%
+  # Use the named phylum_colors vector to look up the color for each Phylum name
+  mutate(Color = phylum_colors[as.character(Phylum)]) %>%
+  # Extract the color column as an unnamed vector
+  pull(Color)
+
+## Need to reverse genus_label_colors
+genus_label_colors_reversed = rev(genus_label_colors)
+
+
+min_log_ratio <- min(ratio_x1_top10$Log_Ratio_AML_to_Healthy, na.rm = TRUE)
+max_log_ratio <- max(ratio_x1_top10$Log_Ratio_AML_to_Healthy, na.rm = TRUE)
+
+ggplot(ratio_x1_top10, 
+       aes(y = Genus, x = Log_Ratio_AML_to_Healthy)) + 
+  
+  coord_cartesian(clip = "off") + 
+  
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  
+  # Map the Symbol_Size column
+  geom_point(aes(color = Phylum, size = Symbol_Size, shape = Significance), stroke = 2) + 
+
+  
+  scale_x_continuous(
+      limits = c(-5, 5), 
+      expand = c(0, 0)
+  ) +
+  
+  # 💥 HIDDEN SIZE LEGEND
+  scale_size_identity(
+      guide = "none" # This hides the legend for the point size
+  ) +
+  
+  theme_bw(base_size = 12) +
+  
+  labs(
+    title = NULL,
+    y = NULL, 
+    x = expression(Log[2] ~ "Ratio (AML / Healthy)")
+  ) +
+  
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    # 1. Move legend to the right
+    legend.position = "right",
+    # 2. Remove the horizontal box setting (let guides() handle the columns)
+    legend.box = "vertical",
+    legend.text = element_text(12),
+    legend.title = element_text(14),
+    panel.border = element_blank(), 
+    panel.grid.major.x = element_blank(), 
+    panel.grid.minor.x = element_blank(),
+    axis.line.y = element_blank(), 
+    axis.ticks.y = element_blank(),
+    axis.text.y = element_text(
+        face = "italic", 
+        size = 10, 
+        hjust = 1, 
+        color = genus_label_colors_reversed 
+    )
+  ) +
+  guides(
+    color = guide_legend(ncol = 1), # Controls point color legend
+    fill = guide_legend(ncol = 1),   # Controls color strip legend
+    shape = "none"
+  ) +
+  scale_fill_manual(name = "Phylum", values = phylum_colors) + 
+  scale_color_manual(name = "Phylum", values = phylum_colors) +
+  scale_shape_manual(values = c("O" = 16, "X" = 4))
+```
+
+## Generate Supplementary Table 1
+```{r}
+read_count_df = read_tsv("readcount_beatAML_oldfiles.txt")
+
+read_count_df$Filename = str_remove(read_count_df$Filename, ".bam")
+
+bug_norm_raw = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Rawcount_top100_genus.txt")
+
+supplementary_table = full_join(read_count_df,
+                                bug_norm_raw)
+
+supplementary_table = supplementary_table |>
+  filter(complete.cases(SampleGroup))
+
+supplementary_table = supplementary_table |>
+  select(-c(Filename, SampleType))
+
+supplementary_table = supplementary_table |>
+  relocate(Readcount, .after = SampleGroup)
+```
+
