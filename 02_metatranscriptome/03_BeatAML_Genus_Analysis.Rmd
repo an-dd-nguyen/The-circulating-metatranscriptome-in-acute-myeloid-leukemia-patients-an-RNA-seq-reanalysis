@@ -10,7 +10,6 @@ library(readxl)
 library(janitor)
 library(performance)
 library(caret)
-library(randomForest)
 library(ggpubr)
 library(scales)
 library(ggbeeswarm)
@@ -20,7 +19,7 @@ library(tidyverse)
 ## Read file
 
 ```{r cars}
-bug_norm = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Normalized_top100_genus.txt")
+bug_norm = read_tsv("../Data/BeatAML_Normalized_top100_genus.txt")
 
 
 
