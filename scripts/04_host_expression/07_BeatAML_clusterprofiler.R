@@ -7,14 +7,14 @@ library(tidyverse)
 
 #https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html#pubmed-trend-of-enriched-terms
 
-pathways = readRDS("../Data/c_Bacteria_pathways.rds")
+pathways = readRDS("../../Data/c_Bacteria_pathways.rds")
 
 rankings = results_batch$logFC
 names(rankings) = df$display_label
 
 rankings1 = rankings
 
-term2gene = read.delim("../Data/Term2Gene_Entrez.txt",
+term2gene = read.delim("../../Data/Term2Gene_Entrez.txt",
                        header = F, sep = " ")
 term2gene = term2gene[, -1]
 term2gene = term2gene[-1, ]
