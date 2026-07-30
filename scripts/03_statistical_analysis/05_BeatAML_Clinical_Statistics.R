@@ -11,12 +11,12 @@ library(MASS)
 library(ggtext)
 library(tidyverse)
 
-clinical = readRDS("../Downloads/BeatAML_clinical_clean.RDS")
+clinical = readRDS("../../Data/BeatAML_clinical_clean.RDS")
 
-drug_response = read_excel("../Downloads/BeatAML_DrugResponse.xlsx")
-mapping = read_excel("../Downloads/beataml_waves1to4_sample_mapping.xlsx")
+drug_response = read_excel("../../Data/BeatAML_DrugResponse.xlsx")
+mapping = read_excel("../../Data/beataml_waves1to4_sample_mapping.xlsx")
 
-bug_norm = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Normalized_top100_genus.txt")
+bug_norm = read_tsv("../../Data/BeatAML_Normalized_top100_genus.txt")
 
 drug_response = left_join(drug_response, mapping |> select(c(labId, dbgap_rnaseq_sample)), by = c("lab_id" = "labId"))
 
