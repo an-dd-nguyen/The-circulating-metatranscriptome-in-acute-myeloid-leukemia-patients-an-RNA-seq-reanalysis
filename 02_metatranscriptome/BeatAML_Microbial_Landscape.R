@@ -40,10 +40,10 @@ genus_bray_curtis_tibble = genus_bray_curtis_tibble |>
     geom_point(alpha = 0.5))
 
 #Genus level
-df_samplegroup = read_tsv("../Input_data/BeatAML_dfsamplegroup.txt")
+df_samplegroup = read_tsv("../Input_data/BeatAML_all_genera_report.txt")
 
 #Phylum level
-df_phylum = read_tsv("../Input_data/Combined_beatAML_oldfiles_krakenuniq_report.txt", col_names = F)
+df_phylum = read_tsv("../Input_data/BeatAML_all_phylum_report.txt", col_names = F)
 
 colnames(df_phylum)[2] = "Reads"
 colnames(df_phylum)[8] = "Levels"
