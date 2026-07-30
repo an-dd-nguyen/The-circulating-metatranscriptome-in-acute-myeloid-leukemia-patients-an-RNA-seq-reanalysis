@@ -2,8 +2,8 @@ library(edgeR)
 library(tidyverse)
 library(vegan)
 
-df = read_tsv("../Downloads/beataml_waves1to4_counts_dbgap.txt")
-genus_df = read_tsv("../Downloads/BeatAML_Results/Data/BeatAML_Normalized_top100_genus.txt")
+df = read_tsv("../Data/beataml_waves1to4_counts_dbgap.txt")
+genus_df = read_tsv("../Data/BeatAML_Normalized_top100_genus.txt")
 
 
 
