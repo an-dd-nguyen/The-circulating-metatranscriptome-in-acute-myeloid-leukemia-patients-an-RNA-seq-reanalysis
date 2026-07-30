@@ -19,7 +19,7 @@ library(tidyverse)
 ## Read file
 
 ```{r cars}
-bug_norm = read_tsv("../Data/BeatAML_Normalized_top100_genus.txt")
+bug_norm = read_tsv("../../Data/BeatAML_Normalized_top100_genus.txt")
 
 
 
