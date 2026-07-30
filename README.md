@@ -5,7 +5,7 @@ KrakenUniq v1.0.4\
 R version 4.4.0 (2024-04-24 ucrt) -- "Puppy Cup"\
 CIBERSORTx version 1.0 https://cibersortx.stanford.edu/ \
 edgeR version 4.2.2\
-clusterProfiler version 4.12.6\
+clusterProfiler version 4.12.6
 
 
 ## Order of script execution\
