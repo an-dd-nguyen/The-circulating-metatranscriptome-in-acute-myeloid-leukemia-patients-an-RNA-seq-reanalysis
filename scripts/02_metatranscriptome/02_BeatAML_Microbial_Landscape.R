@@ -13,7 +13,7 @@ library(tidyverse)
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
 
-x = read_tsv("../Data/BeatAML_Normalized_top100_genus.txt") |>
+x = read_tsv("../../Data/BeatAML_Normalized_top100_genus.txt") |>
   filter(complete.cases(SampleGroup))
 x$centerID = factor(x$centerID)
 
@@ -40,10 +40,10 @@ genus_bray_curtis_tibble = genus_bray_curtis_tibble |>
     geom_point(alpha = 0.5))
 
 #Genus level
-df_samplegroup = read_tsv("../Data/BeatAML_all_genera_report.txt")
+df_samplegroup = read_tsv("../../Data/BeatAML_all_genera_report.txt")
 
 #Phylum level
-df_phylum = read_tsv("../Data/BeatAML_all_phylum_report.txt", col_names = F)
+df_phylum = read_tsv("../../Data/BeatAML_all_phylum_report.txt", col_names = F)
 
 colnames(df_phylum)[2] = "Reads"
 colnames(df_phylum)[8] = "Levels"
