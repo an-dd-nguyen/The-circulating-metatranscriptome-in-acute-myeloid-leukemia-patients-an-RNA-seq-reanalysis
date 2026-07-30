@@ -6,7 +6,7 @@ library(DOSE)
 library(tidyverse)
 
 #https://yulab-smu.top/biomedical-knowledge-mining-book/enrichplot.html#pubmed-trend-of-enriched-terms
-pathways = read.gmt("../Data/h.all.v2025.1.Hs.symbols.gmt")
+pathways = read.gmt("../../Data/h.all.v2025.1.Hs.symbols.gmt")
 
 #Faecabacterium
 
